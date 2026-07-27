@@ -88,7 +88,7 @@
 
   /* ---------- Linha de rodapé (folio): edição, data, tipo de edição ---------- */
   .folio{
-    display: flex;
+    display: inline-flex;
     flex-wrap: wrap;
     align-items: center;
     justify-content: center;
@@ -98,12 +98,16 @@
     font-weight: 500;
     letter-spacing: 0.09em;
     text-transform: uppercase;
-    color: var(--ink-soft);
+    color: #1c1a15;
+    background: #ffffff;
+    border-top: 1px solid #1c1a15;
+    border-bottom: 1px solid #1c1a15;
+    padding: 6px 16px;
     margin: 0 0 14px;
   }
 
   .folio-sep{
-    opacity: 0.55;
+    opacity: 0.5;
   }
 
   /* ---------- Linhas duplas, como as que emolduram um nameplate de jornal ---------- */
@@ -983,8 +987,9 @@
 
   /* ===================================================================
      LIMITE DIÁRIO — no máximo 5 músicas aleatórias por usuário/dia.
-     Persistido em localStorage (mesma abordagem já usada pelo painel de
-     capas), então recarregar a página não reseta a contagem. O contador
+     Persistido em localStorage (contagem por navegador/dispositivo,
+     intencionalmente não compartilhada entre usuários), então recarregar
+     a página não reseta a contagem. O contador
      é sempre calculado com base no dia local do usuário (não UTC) e é
      zerado automaticamente à meia-noite local, inclusive se a aba ficar
      aberta atravessando a virada do dia — sem precisar recarregar nada.
@@ -1232,6 +1237,7 @@
   })();
 </script>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 /* =====================================================================
    CAPAS — animação de capas de álbum caindo + painel oculto em /capas
@@ -1241,133 +1247,201 @@
 (function(){
   'use strict';
 
-  var STORAGE_KEY   = 'gazetaSonoraCapas';       // lista de capas cadastradas
-  var SEEDED_KEY     = 'gazetaSonoraCapasSeeded'; // evita re-semear após o usuário apagar tudo
+  var SUPABASE_URL       = 'https://nzkeuvlrkcauqjyxuwgb.supabase.co';
+  var SUPABASE_ANON_KEY  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im56a2V1dmxya2NhdXFqeXh1d2diIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUxODAxMzYsImV4cCI6MjEwMDc1NjEzNn0.NZQJl7WIbNsYDj3Zklmb6BYIVqz8ec7PYTzDtdOo-D0';
+  var SUPABASE_TABELA    = 'capas';
+  var SUPABASE_BUCKET    = 'capas';
+
   var AUTH_KEY        = 'gazetaSonoraCapasAuth';   // autenticação do painel (por aba)
   var SENHA_PAINEL    = '4352';
   var TIPOS_ACEITOS   = ['image/jpeg', 'image/png', 'image/webp'];
   var EXT_ACEITAS     = /\.(jpe?g|png|webp)$/i;
-  var TAMANHO_MAXIMO  = 3 * 1024 * 1024; // 3MB por imagem (limite prático do localStorage)
+  var TAMANHO_MAXIMO  = 5 * 1024 * 1024; // 5MB por imagem
+
+  var supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
   /* --------------------------- Armazenamento --------------------------- *
-   * Usa o localStorage do navegador — é o mecanismo de persistência do
-   * lado do cliente já utilizado por este projeto (site estático, sem
-   * backend próprio). As capas ficam salvas como data URLs (base64).
+   * As capas ficam guardadas no Supabase (Storage + tabela "capas"), então
+   * toda pessoa que acessa o site vê as mesmas capas — não é mais algo
+   * local do navegador. Um cache em memória é populado de forma
+   * assíncrona a partir do Supabase e mantido em sincronia em tempo real
+   * (via Realtime) sempre que alguém, em qualquer navegador, adiciona ou
+   * remove uma capa.
    * ----------------------------------------------------------------------*/
   var CapasStore = (function(){
-    function ler(){
-      try{
-        var raw = window.localStorage.getItem(STORAGE_KEY);
-        return raw ? JSON.parse(raw) : [];
-      }catch(e){
-        console.warn('Não foi possível ler as capas salvas:', e);
-        return [];
-      }
+    var cache = [];
+    var carregado = false;
+
+    function extensao(nomeArquivo){
+      var m = /\.([a-z0-9]+)$/i.exec(nomeArquivo || '');
+      return m ? m[1].toLowerCase() : 'jpg';
     }
 
-    function salvar(lista){
-      try{
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(lista));
-      }catch(e){
-        console.warn('Não foi possível salvar as capas (armazenamento cheio?):', e);
-      }
-      // Notifica quem estiver ouvindo (animação, painel) nesta mesma aba.
-      window.dispatchEvent(new CustomEvent('capas:updated', { detail: lista }));
+    function notificar(){
+      window.dispatchEvent(new CustomEvent('capas:updated', { detail: cache }));
+    }
+
+    function mapearLinha(linha){
+      return {
+        id: linha.id,
+        nome: linha.nome,
+        path: linha.path,
+        dataUrl: linha.url,
+        criadaEm: linha.criada_em
+      };
+    }
+
+    function buscarRemoto(){
+      return supabase
+        .from(SUPABASE_TABELA)
+        .select('*')
+        .order('criada_em', { ascending: true })
+        .then(function(resp){
+          if (resp.error){
+            console.warn('Não foi possível carregar as capas do Supabase:', resp.error);
+            return cache;
+          }
+          cache = (resp.data || []).map(mapearLinha);
+          carregado = true;
+          notificar();
+          return cache;
+        });
+    }
+
+    function aguardarCarregamento(){
+      return carregado ? Promise.resolve(cache) : buscarRemoto();
     }
 
     function listar(){
-      return ler();
+      return cache;
     }
 
     function adicionar(arquivo){
-      return new Promise(function(resolve, reject){
-        var tipoOk = TIPOS_ACEITOS.indexOf(arquivo.type) !== -1 || EXT_ACEITAS.test(arquivo.name);
-        if (!tipoOk){
-          reject(new Error('Formato não suportado. Envie um arquivo JPG, JPEG, PNG ou WebP.'));
-          return;
-        }
-        if (arquivo.size > TAMANHO_MAXIMO){
-          reject(new Error('Arquivo muito grande. O limite por imagem é 3MB.'));
-          return;
-        }
+      var tipoOk = TIPOS_ACEITOS.indexOf(arquivo.type) !== -1 || EXT_ACEITAS.test(arquivo.name);
+      if (!tipoOk){
+        return Promise.reject(new Error('Formato não suportado. Envie um arquivo JPG, JPEG, PNG ou WebP.'));
+      }
+      if (arquivo.size > TAMANHO_MAXIMO){
+        return Promise.reject(new Error('Arquivo muito grande. O limite por imagem é ' + Math.round(TAMANHO_MAXIMO / 1024 / 1024) + 'MB.'));
+      }
 
-        var leitor = new FileReader();
-        leitor.onload = function(){
-          var lista = ler();
-          lista.push({
-            id: 'capa_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
-            nome: arquivo.name,
-            dataUrl: leitor.result,
-            criadaEm: Date.now()
-          });
-          salvar(lista);
-          resolve();
-        };
-        leitor.onerror = function(){
-          reject(new Error('Falha ao ler o arquivo "' + arquivo.name + '".'));
-        };
-        leitor.readAsDataURL(arquivo);
-      });
+      var id = 'capa_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+      var caminho = id + '.' + extensao(arquivo.name);
+
+      return supabase.storage
+        .from(SUPABASE_BUCKET)
+        .upload(caminho, arquivo, { cacheControl: '3600', upsert: false })
+        .then(function(resp){
+          if (resp.error) throw new Error('Falha ao enviar "' + arquivo.name + '": ' + resp.error.message);
+
+          var urlPublica = supabase.storage.from(SUPABASE_BUCKET).getPublicUrl(caminho).data.publicUrl;
+
+          return supabase
+            .from(SUPABASE_TABELA)
+            .insert({
+              id: id,
+              nome: arquivo.name,
+              path: caminho,
+              url: urlPublica,
+              criada_em: Date.now()
+            })
+            .select()
+            .single();
+        })
+        .then(function(resp){
+          if (resp.error) throw new Error('Falha ao salvar "' + arquivo.name + '" no banco: ' + resp.error.message);
+          cache.push(mapearLinha(resp.data));
+          notificar();
+        });
     }
 
     function remover(id){
-      var lista = ler().filter(function(c){ return c.id !== id; });
-      salvar(lista);
+      var capa = null;
+      for (var i = 0; i < cache.length; i++){
+        if (cache[i].id === id){ capa = cache[i]; break; }
+      }
+
+      // Remoção otimista: some da tela na hora, mesmo que a chamada
+      // ao Supabase ainda esteja em andamento.
+      cache = cache.filter(function(c){ return c.id !== id; });
+      notificar();
+
+      supabase.from(SUPABASE_TABELA).delete().eq('id', id).then(function(resp){
+        if (resp.error) console.warn('Não foi possível remover a capa no banco:', resp.error);
+      });
+
+      if (capa && capa.path){
+        supabase.storage.from(SUPABASE_BUCKET).remove([capa.path]).then(function(resp){
+          if (resp.error) console.warn('Não foi possível remover o arquivo no Storage:', resp.error);
+        });
+      }
     }
 
     /* Gera algumas capas de exemplo (canvas, sem dependências externas)
-       só na primeiríssima visita, para a animação já nascer com vida.
-       Se o usuário apagar tudo depois, não voltamos a semear. */
+       só se ainda não existir NENHUMA capa cadastrada no Supabase — roda
+       no máximo uma vez para o site inteiro, não por navegador. */
     function semearPadraoSeNecessario(){
-      if (window.localStorage.getItem(SEEDED_KEY)) return;
-      window.localStorage.setItem(SEEDED_KEY, '1');
-      if (ler().length) return;
+      return aguardarCarregamento().then(function(lista){
+        if (lista.length) return;
 
-      var paletas = [
-        ['#1db954', '#0f5c2a'],
-        ['#16294a', '#4a6fb5'],
-        ['#b3261e', '#4a0e0a'],
-        ['#e9b44c', '#8a5a1a'],
-        ['#4a4a48', '#1a1a1a']
-      ];
+        var paletas = [
+          ['#1db954', '#0f5c2a'],
+          ['#16294a', '#4a6fb5'],
+          ['#b3261e', '#4a0e0a'],
+          ['#e9b44c', '#8a5a1a'],
+          ['#4a4a48', '#1a1a1a']
+        ];
 
-      var lista = paletas.map(function(cores, i){
-        var canvas = document.createElement('canvas');
-        canvas.width = 200;
-        canvas.height = 200;
-        var ctx = canvas.getContext('2d');
-        var grad = ctx.createLinearGradient(0, 0, 200, 200);
-        grad.addColorStop(0, cores[0]);
-        grad.addColorStop(1, cores[1]);
-        ctx.fillStyle = grad;
-        ctx.fillRect(0, 0, 200, 200);
+        var promessas = paletas.map(function(cores, i){
+          var canvas = document.createElement('canvas');
+          canvas.width = 200;
+          canvas.height = 200;
+          var ctx = canvas.getContext('2d');
+          var grad = ctx.createLinearGradient(0, 0, 200, 200);
+          grad.addColorStop(0, cores[0]);
+          grad.addColorStop(1, cores[1]);
+          ctx.fillStyle = grad;
+          ctx.fillRect(0, 0, 200, 200);
 
-        // Um pequeno "disco" para lembrar uma capa de álbum/vinil
-        ctx.beginPath();
-        ctx.arc(100, 100, 46, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(255,255,255,0.18)';
-        ctx.fill();
-        ctx.beginPath();
-        ctx.arc(100, 100, 14, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(0,0,0,0.35)';
-        ctx.fill();
+          // Um pequeno "disco" para lembrar uma capa de álbum/vinil
+          ctx.beginPath();
+          ctx.arc(100, 100, 46, 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(255,255,255,0.18)';
+          ctx.fill();
+          ctx.beginPath();
+          ctx.arc(100, 100, 14, 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(0,0,0,0.35)';
+          ctx.fill();
 
-        return {
-          id: 'capa_seed_' + i,
-          nome: 'exemplo-' + (i + 1) + '.png',
-          dataUrl: canvas.toDataURL('image/png'),
-          criadaEm: Date.now()
-        };
+          return new Promise(function(resolve){
+            canvas.toBlob(function(blob){
+              var arquivo = new File([blob], 'exemplo-' + (i + 1) + '.png', { type: 'image/png' });
+              resolve(adicionar(arquivo).catch(function(erro){
+                console.warn('Falha ao semear capa de exemplo:', erro);
+              }));
+            }, 'image/png');
+          });
+        });
+
+        return Promise.all(promessas);
       });
-
-      salvar(lista);
     }
+
+    // Sincroniza o cache local quase em tempo real quando qualquer
+    // pessoa, em qualquer navegador, adiciona ou remove uma capa.
+    supabase
+      .channel('capas-mudancas')
+      .on('postgres_changes', { event: '*', schema: 'public', table: SUPABASE_TABELA }, function(){
+        buscarRemoto();
+      })
+      .subscribe();
 
     return {
       listar: listar,
       adicionar: adicionar,
       remover: remover,
-      semearPadraoSeNecessario: semearPadraoSeNecessario
+      semearPadraoSeNecessario: semearPadraoSeNecessario,
+      aguardarCarregamento: aguardarCarregamento
     };
   })();
 
@@ -1591,9 +1665,6 @@
 
     document.addEventListener('visibilitychange', pausarSeOculto);
     window.addEventListener('capas:updated', atualizarCache);
-    window.addEventListener('storage', function(evt){
-      if (evt.key === STORAGE_KEY) atualizarCache();
-    });
 
     return { iniciar: iniciar, parar: parar };
   })();
@@ -1719,7 +1790,10 @@
       var container = document.getElementById('capas-view');
       if (!container) return;
       if (autenticado()){
-        renderPainel(container);
+        container.innerHTML = '<div class="capas-card"><p class="capas-lead">Carregando capas…</p></div>';
+        CapasStore.aguardarCarregamento().then(function(){
+          renderPainel(container);
+        });
       } else {
         renderFormularioSenha(container, false);
       }

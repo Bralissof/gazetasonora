@@ -23,3 +23,21 @@ O objetivo é incentivar a descoberta de novas músicas e tornar a escolha da pr
 <p align="center">
 Feche os olhos, aperte o play e deixe o acaso escolher a trilha sonora do seu dia. 🎶
 </p>
+
+
+---
+
+## 💼 Me contrate
+
+<p align="center">
+  <img src="./assets/meu-banner.png" alt="Miguel Rodrigues" width="100%">
+</p>
+
+Se você gostou deste projeto e procura alguém para desenvolver aplicações web, criar projetos digitais ou transformar ideias em produtos, ficarei feliz em conversar.
+
+🌐 **Conheça meu portfólio:**  
+**https://bralis.site/**
+
+<p align="center">
+Obrigado por visitar o projeto! 🚀
+</p>

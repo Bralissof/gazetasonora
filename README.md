@@ -30,7 +30,7 @@ Feche os olhos, aperte o play e deixe o acaso escolher a trilha sonora do seu di
 ## 💼 Me contrate
 
 <p align="center">
-  <img src="./assets/meu-banner.png" alt="Miguel Rodrigues" width="100%">
+  <img src="./assets/meu-banner.png" alt="Miguel Rodrigues" width="110%">
 </p>
 
 Se você gostou deste projeto e procura alguém para desenvolver aplicações web, criar projetos digitais ou transformar ideias em produtos, ficarei feliz em conversar.

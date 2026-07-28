@@ -711,9 +711,39 @@
     .folio{ font-size: 9.5px; gap: 6px 6px; padding: 5px 10px; }
     .sticker-fone{ width: clamp(38px, 12vw, 52px); top: -26px; right: -16px; }
   }
+
+  /* ===================== Canto TV (link externo, fora do layout) ===================== */
+  .corner-tv-link{
+    position: fixed;
+    left: 0;
+    bottom: 0;
+    z-index: 9999;
+    display: block;
+    line-height: 0;
+  }
+
+  .corner-tv-link img{
+    display: block;
+    width: clamp(70px, 12vw, 140px);
+    height: auto;
+    transition: transform 0.2s ease;
+  }
+
+  .corner-tv-link:hover img{
+    transform: scale(1.06) rotate(-2deg);
+  }
+
+  @media (max-width: 520px){
+    .corner-tv-link img{ width: clamp(56px, 20vw, 90px); }
+  }
 </style>
 </head>
 <body>
+
+  <!-- Imagem fixa no canto inferior esquerdo, fora do layout, com link externo -->
+  <a class="corner-tv-link" href="https://bralis.site/" target="_blank" rel="noopener noreferrer" aria-label="Visitar bralis.site">
+    <img src="tv-head.png" alt="Homem com cabeça de TV">
+  </a>
 
   <!-- Camada de animação: capas caindo nas laterais. 100% decorativa (pointer-events: none). -->
   <div class="capas-layer" id="capas-layer" aria-hidden="true"></div>
